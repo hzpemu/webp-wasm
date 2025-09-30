@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>图片转 WebP Base64 (缩放限制)</title>
+  <style>
+  :root {
+  --color-main: #3A4454;
+  --color-grey: #53687E;
+  --color-light: #F5DDDD;
+  --color-special: #6B4E71;
+}
+
+body {
+  margin: 0;
+  font-family: 'Muli', sans-serif;
+  color: var(--color-main);
+  box-sizing: border-box;
+}
+
+h1 {
+  font-weight: 700;
+  font-size: 3.333rem;
+  text-align: center;
+}
+
+input[type="file"] {
+  display: none;
+}
+
+
+main {
+  border: 4px solid var(--color-special);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px -4px var(--color-grey);
+  max-width: 768px;
+  margin: 1rem auto;
+  padding: 2rem;
+}
+
+img {
+  max-width: 100%;
+  margin: 1rem 0;
+}
+
+a[download] {
+  transition: background-color 200ms ease-in;
+  border: 1px solid var(--color-grey);
+  border-radius: 8px;
+  padding: 0.5rem;
+  color: inherit;
+  text-decoration: none;
+  
+  &:hover {
+    background-color: var(--color-light);
+    cursor: pointer;
+  }
+}
+
+.hidden {
+  display: none !important;
+}
+
+#dropzone {
+  transition: border-color 200ms ease-in;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 4px dashed var(--color-grey);
+  border-radius: 8px;
+  width: auto;
+  min-height: 150px;
+  background: var(--color-light);
+  
+  &.active {
+    border-color: var(--color-special);
+  }
+  
+  &:hover {
+    cursor: pointer;
+  }
+}
+
+#result {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-top: 1rem;
+  text-align: center;
+}
+    </style>
+</head>
+
+
+<body>
+
+
+<main>
+  <div class="container">
+    <h1>WebP Encoder</h1>
+    <p><strong>CAUTION!</strong> This is just for demo purposes and doesn't include any best practices. Please consider excluding the WebP encoding logic into a Web Worker for optimal performance!</p>
+    <div id="dropzone">Click to upload image<input type="file"></div>
+  </div>
+  <div id="result" class="hidden">
+    <img />
+    <a download>Download .webp</a>
+  </div>
+</main>
+
+<script src="https://unpkg.com/@saschazar/wasm-webp@1.0.0/wasm_webp.js"></script>
+<script>
+
+// 1. --- DOM elements --- //
+const dropzone = document.querySelector('#dropzone');
+const input = document.querySelector('input[type="file"]');
+const resultDiv = document.querySelector('#result');
+const resultDownload = document.querySelector('#result > a[download]');
+const resultImg = document.querySelector('#result > img');
+
+// 5. --- WebP options --- //
+
+const options = {
+  quality: 75,
+  target_size: 0,
+  target_PSNR: 0,
+  method: 4,
+  sns_strength: 50,
+  filter_strength: 60,
+  filter_sharpness: 0,
+  filter_type: 1,
+  partitions: 0,
+  segments: 4,
+  pass: 1,
+  show_compressed: 0,
+  preprocessing: 0,
+  autofilter: 0,
+  partition_limit: 0,
+  alpha_compression: 1,
+  alpha_filtering: 1,
+  alpha_quality: 100,
+  lossless: 0,
+  exact: 0,
+  image_hint: 0,
+  emulate_jpeg_size: 0,
+  thread_level: 0,
+  low_memory: 0,
+  near_lossless: 100,
+  use_delta_palette: 0,
+  use_sharp_yuv: 0
+};
+
+// 4. --- WebAssembly --- //
+
+// Instatiate Wasm module via a Promise
+const webp = async ({ array, width, height }) => {
+  const module = await new Promise(resolve => {
+    const wasm = wasm_webp({
+      noInitialRun: true,
+      onRuntimeInitialized() {
+        const { then, ...other } = wasm;
+        resolve(other);
+      }
+    });
+  });
+  // Encode the raw image data to WebP
+  const result = new Uint8Array(module.encode(array, width, height, options));
+  module.free();
+  
+  // Convert resulting WebP Uint8Array to Blob
+  const blob = new Blob([result], { type: 'image/webp' });
+  const webpUrl = URL.createObjectURL(blob);
+  resultImg.src = webpUrl;
+  resultDownload.href = webpUrl;
+  resultDiv.classList.remove('hidden');
+};
+
+// 3. --- Event handlers --- //
+
+// Create image from event data
+const createImage = d => {
+  const url = URL.createObjectURL(d);
+  const img = new Image();
+  img.src = url;
+  img.onload = async () => handleFile(img);
+};
+
+// Draw image on canvas to get raw RGB data
+const handleFile = async img => {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  ctx.drawImage(img, 0, 0);
+  
+  const imgData = ctx.getImageData(0, 0, img.naturalWidth, img.naturalHeight);
+  const array = imgData.data.filter((_, i) => i % 4 !== 3); // deletes alpha channel
+  
+  return webp({ array, width: img.naturalWidth, height: img.naturalHeight });
+};
+
+// 2. --- Event listeners --- //
+
+input.addEventListener('change', async e => {
+  const [file] = input.files;
+  return createImage(file);
+});
+dropzone.addEventListener('click', () => input.click());
+document.addEventListener('dragstart', e => {
+});
+document.addEventListener('dragenter', e => {
+  dropzone.classList.add('active');
+});
+document.addEventListener('dragleave', e => {
+  dropzone.classList.remove('active');
+});
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', async e => {
+  e.preventDefault();
+  dropzone.classList.remove('active');
+  const { dataTransfer: { files: [file] = [] } = {} } = e || {};
+  return createImage(file);
+});
+</script>
+</body>
+</html>
+
+
